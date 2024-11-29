@@ -1,0 +1,9 @@
+phoneList: # 联系方式列表
+  - phoneListItem
+  - - area: # 区号
+      number: # 数字
+baseId: # 父类id
+
+aList:
+  - - - aListItemItem1
+      - aListItemItem2
