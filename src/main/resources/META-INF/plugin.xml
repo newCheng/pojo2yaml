@@ -17,10 +17,10 @@
      <h1>IntelliJ POJO2YAML</h1>
      <br/>
      <b>A simple plugin for converting POJO to YAML schema in IntelliJ IDEA.</b>
-     <p>this plugin support<br>
-     + convert basic data type to YAML schema
-     + convert nested object to YAML schema
-     + convert collection to YAML schema
+     <p>this plugin support:<br>
+     + convert basic data type to YAML schema<br>
+     + convert nested object to YAML schema<br>
+     + convert collection to YAML schema<br>
      </p>
   ]]></description>
 
