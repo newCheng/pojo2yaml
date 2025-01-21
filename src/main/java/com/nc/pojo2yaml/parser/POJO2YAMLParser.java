@@ -1,6 +1,5 @@
 package com.nc.pojo2yaml.parser;
 
-import com.nc.pojo2yaml.POJOField;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiField;
@@ -9,6 +8,7 @@ import com.intellij.psi.impl.source.PsiClassReferenceType;
 import com.intellij.psi.impl.source.javadoc.PsiDocTokenImpl;
 import com.intellij.psi.javadoc.PsiDocComment;
 import com.intellij.psi.util.PsiUtil;
+import com.nc.pojo2yaml.POJOField;
 import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.uast.UClass;
 import org.jetbrains.uast.UElement;
@@ -41,7 +41,7 @@ import java.util.stream.Collectors;
  */
 public class POJO2YAMLParser {
 
-    private final List<String> collectionTypes = List.of(
+    private static final List<String> collectionTypes = List.of(
             "java.lang.Iterable",
             "java.util.Collection",
             "java.util.AbstractCollection",
@@ -74,7 +74,7 @@ public class POJO2YAMLParser {
         PsiField[] allFields = psiClass.getAllFields();
         for (PsiField field : allFields) {
             POJOField pojoField = new POJOField(field.getName(), field.getType(), field.getDocComment());
-            writeMap(pojoField, emitter);
+            writeMap(psiClass.getQualifiedName(), pojoField, emitter);
         }
 
         emitter.emit(new MappingEndEvent(null, null));
@@ -83,7 +83,7 @@ public class POJO2YAMLParser {
         return null;
     }
 
-    void writeMap(POJOField field, Emitter emitter) throws IOException {
+    void writeMap(String currentClassQualifiedName, POJOField field, Emitter emitter) throws IOException {
         ImplicitTuple allImplicit = new ImplicitTuple(true, true);
         PsiType type = field.getType();
         String fieldName = field.getName();
@@ -94,7 +94,7 @@ public class POJO2YAMLParser {
         }
 
         //写value
-        if (isPrimitiveType(type)) {
+        if (isPrimitiveType(currentClassQualifiedName, type)) {
             //基础数据处理
             emitter.emit(new ScalarEvent(null, "yaml.org,2002:str", allImplicit, "", null, null, DumperOptions.ScalarStyle.PLAIN));
             if (StringUtils.isNotBlank(commentStr)) {
@@ -105,7 +105,7 @@ public class POJO2YAMLParser {
             if (StringUtils.isNotBlank(commentStr)) {
                 emitter.emit(new CommentEvent(CommentType.IN_LINE, commentStr, null, null));
             }
-            writeCollection(field, emitter);
+            writeCollection(currentClassQualifiedName, field, emitter);
         } else {
             //自定义对象处理
             if (StringUtils.isNotBlank(commentStr)) {
@@ -115,14 +115,13 @@ public class POJO2YAMLParser {
             emitter.emit(new MappingStartEvent(null, "yaml.org,2002:map", true, null, null, DumperOptions.FlowStyle.BLOCK));
             for (PsiField resolveField : psiClass.getAllFields()) {
                 POJOField pojoField = new POJOField(resolveField.getName(), resolveField.getType(), resolveField.getDocComment());
-                writeMap(pojoField, emitter);
+                writeMap(psiClass.getQualifiedName(), pojoField, emitter);
             }
             emitter.emit(new MappingEndEvent(null, null));
         }
     }
 
-    void writeCollection(POJOField field, Emitter emitter) throws IOException {
-        ImplicitTuple allImplicit = new ImplicitTuple(true, true);
+    void writeCollection(String currentClassQualifiedName, POJOField field, Emitter emitter) throws IOException {
         PsiType type = field.getType();
         String fieldName = field.getName();
         String collectionItemName = fieldName + "Item";
@@ -131,27 +130,36 @@ public class POJO2YAMLParser {
             POJOField pojoField = new POJOField(collectionItemName, itemType, null);
             emitter.emit(new SequenceStartEvent(null, null, true, null, null, DumperOptions.FlowStyle.BLOCK));
             emitter.emit(new MappingStartEvent(null, "yaml.org,2002:map", true, null, null, DumperOptions.FlowStyle.BLOCK));
-            writeMap(pojoField, emitter);
+            writeMap(currentClassQualifiedName, pojoField, emitter);
             emitter.emit(new MappingEndEvent(null, null));
             emitter.emit(new SequenceEndEvent(null, null));
-        }else if(isPrimitiveType(itemType)){
+        } else if (isPrimitiveType(currentClassQualifiedName, itemType)) {
             POJOField pojoField = new POJOField("", itemType, null);
             emitter.emit(new SequenceStartEvent(null, null, true, null, null, DumperOptions.FlowStyle.BLOCK));
-            writeMap(pojoField, emitter);
+            writeMap(currentClassQualifiedName, pojoField, emitter);
             emitter.emit(new SequenceEndEvent(null, null));
         } else {
             POJOField pojoField = new POJOField("", itemType, null);
             emitter.emit(new SequenceStartEvent(null, null, true, null, null, DumperOptions.FlowStyle.BLOCK));
-            writeMap(pojoField, emitter);
+            writeMap(currentClassQualifiedName, pojoField, emitter);
             emitter.emit(new SequenceEndEvent(null, null));
         }
     }
 
 
-    private Boolean isPrimitiveType(PsiType type) {
+    private Boolean isPrimitiveType(String currentClassQualifiedName, PsiType type) {
         String canonicalText = type.getCanonicalText();
-        //StrUtil.startWithAny(variableType, "java.lang") || StrUtil.equalsAny(variableType, "java.util.Map")
-        if (StringUtils.equalsAny(canonicalText, "boolean", "byte", "short", "int", "long", "float", "double", "char") || StringUtils.startsWithAny(canonicalText, "java.lang", "java.util.Map")) {
+        //基础类型、枚举、自引用视为基础类型
+        if (StringUtils.equalsAny(canonicalText, "boolean", "byte", "short", "int", "long", "float", "double", "char") ||
+                StringUtils.startsWithAny(canonicalText, "java.lang", "java.util.Map", "java.util.Date", "java.time", "java.util.Calendar")) {
+            return true;
+        }
+        PsiClass psiClass = PsiUtil.resolveClassInClassTypeOnly(type);
+        if (psiClass == null) {
+            return true;
+        }
+        String typeQualifiedName = psiClass.getQualifiedName();
+        if (psiClass.isEnum() || currentClassQualifiedName.equals(typeQualifiedName)) {
             return true;
         }
         return false;
@@ -163,6 +171,7 @@ public class POJO2YAMLParser {
         List<String> typeNameList = new ArrayList<>();
         typeNameList.add(psiClass.getQualifiedName());
         typeNameList.addAll(Arrays.stream(supers).map(PsiClass::getQualifiedName).collect(Collectors.toList()));
+        typeNameList = typeNameList.stream().filter(e->e!=null).collect(Collectors.toList());
         boolean isCollectionType = typeNameList.stream().anyMatch(collectionTypes::contains);
         return isCollectionType;
     }
